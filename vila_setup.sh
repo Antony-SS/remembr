@@ -28,7 +28,8 @@ python -m pip install -e ".[train]"
 python -m pip install -e ".[eval]"
 
 # Install HF's Transformers
-python -m pip install git+https://github.com/huggingface/transformers@v4.37.2
+python -m pip install transformers
+
+# Replace transformers and deepspeed files
 site_pkg_path=$(python -c 'import site; print(site.getsitepackages()[0])')
-cp -rv ./llava/train/transformers_replace/* $site_pkg_path/transformers/
 cp -rv ./llava/train/deepspeed_replace/* $site_pkg_path/deepspeed/

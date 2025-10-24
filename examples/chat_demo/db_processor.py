@@ -47,7 +47,7 @@ def memory_builder_args(args=None):
     parser.add_argument("--top_p", type=float, default=None)
     parser.add_argument("--num_beams", type=int, default=1)
     parser.add_argument("--max_new_tokens", type=int, default=512)
-    args = parser.parse_args()
+    args = parser.parse_args([])
 
     return args
 
@@ -80,7 +80,11 @@ class ROSMemoryBuilder(Node):
         self.data_buffer = [[]]
         self.pose_buffer = []
         self.image_buffer = []
-        self.last_pose = [0,0,0]
+        self.last_pose = {
+            'position': [0.0, 0.0, 0.0],
+            'orientation': 0.0,
+            'time': 0.0
+        }
 
 
         self.is_compressed = False

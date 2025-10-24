@@ -48,6 +48,19 @@ class GradioDemo:
 
         self.db_dict = {}
 
+        if self.rosbag_enabled:
+            self.rosbag_path = args.rosbag_path
+            self.collection_name = args.collection_name
+            self.pos_topic = args.pos_topic
+            self.image_topic = args.image_topic
+
+        else:
+            self.rosbag_path = None
+            self.collection_name = args.collection_name
+            self.pos_topic = args.pos_topic
+            self.image_topic = args.image_topic
+
+        self.db_uri = args.db_uri # always add this
         self.launch_demo()
 
 
@@ -74,7 +87,7 @@ class GradioDemo:
         self.db_dict['db_ip'] = db_uri.split('://')[1].split(':')[0]
 
 
-        print("launching threading")
+        print("Launching threading . . . ")
         mem_builder = lambda: create_and_launch_memory_builder(None, db_ip=self.db_dict['db_ip'], \
                                     collection_name=self.db_dict['collection_name'], \
                                         pos_topic=self.db_dict['pos_topic'], \
@@ -84,6 +97,11 @@ class GradioDemo:
         # launch processing thread
         proc = StoppableThread(target=mem_builder)
         proc.start()
+
+        if self.rosbag_enabled:
+            fileobj = self.rosbag_path
+        else:
+            fileobj = fileobj
 
         bag_process = subprocess.Popen(["ros2", "bag", "play", fileobj],  stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
 
@@ -97,6 +115,10 @@ class GradioDemo:
 
 
     def launch_demo(self):
+
+        if self.rosbag_enabled:
+            print("Processing Rosbag . . . ")
+            self.process_file(self.rosbag_path, args.collection_name, args.pos_topic, args.image_topic, args.db_uri)
 
 
         # define chatter in here
@@ -113,11 +135,6 @@ class GradioDemo:
             log = []
             for output in graph.stream(inputs):
                 for key, value in output.items():
-                    # pprint.pprint(f"Output from node '{key}':")
-                    # pprint.pprint("---")
-                    # pprint.pprint(value, indent=2, width=80, depth=None)
-                    # log += [str(value['messages'])]
-
                     log.append('------------')
                     log.append(f"Output from node '{key}':")
                     for item in value['messages']:
@@ -159,20 +176,13 @@ class GradioDemo:
                 with gr.Column(scale=1):
                     output_log = gr.Textbox(label="Inference log")
 
+            # Define DB URI and selector BEFORE they are referenced
+            with gr.Column(scale=1):
+                db_uri_box = gr.Textbox(label="Database URI", value="http://127.0.0.1:19530")
+                selector = self.get_options(args.db_uri)
 
-                with gr.Row():
-                    # only have this section if we have ROS enabled
-                    if self.rosbag_enabled:
-                        with gr.Column(scale=1):
-                            upload_name = gr.Textbox(label="Name of new DB collection")
-                            pos_topic = gr.Textbox(label="Position Topic", value="/amcl_pose")
-                            image_topic = gr.Textbox(label="Image Topic", value="front_stereo_camera/left/image_raw")
-
-                            file_upload = gr.File()
-                            file_upload.upload(self.process_file, inputs=[file_upload, upload_name, pos_topic, image_topic, db_uri_box])    
-
+            with gr.Row():
                 with gr.Column(scale=1):
-
                     db_uri_box = gr.Textbox(label="Database URI", value="http://127.0.0.1:19530")
 
                     selector = self.get_options(args.db_uri)
@@ -197,9 +207,13 @@ if __name__ == '__main__':
     parser.add_argument("--chatbot_host_port", type=int, default=7860)
 
     # Options: 'nim/meta/llama-3.1-405b-instruct', 'gpt-4o', or any Ollama LLMs
-    parser.add_argument("--llm_backend", type=str, default='codestral')
-
     parser.add_argument("--rosbag_enabled", action='store_true')
+    parser.add_argument("--llm_backend", type=str, default='codestral')
+    parser.add_argument("--rosbag_path", type=str, default="")
+    parser.add_argument("--image_topic", type=str, default="/camera/rgb/image_color")
+    parser.add_argument("--pos_topic", type=str, default="/pose")
+    parser.add_argument("--collection_name", type=str, default="test")
+
 
     args = parser.parse_args()
 

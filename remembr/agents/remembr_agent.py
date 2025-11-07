@@ -72,23 +72,55 @@ def should_continue(state: AgentState):
     messages = state["messages"]
 
     last_message = messages[-1]
-    # If there is no function call, then we finish
-    if not last_message.tool_calls:
+    # Use getattr for safe access to tool_calls
+    tool_calls = getattr(last_message, 'tool_calls', None)
+    
+    if not tool_calls:
+        print(f"[DEBUG] should_continue: No tool_calls, returning 'end'")
         return "end"
-    else:
-        return "continue"
+    
+    # Check if any tool call is __conversational_response - if so, end
+    for tool_call in tool_calls:
+        if isinstance(tool_call, dict) and tool_call.get('name') == '__conversational_response':
+            print(f"[DEBUG] should_continue: Found __conversational_response, returning 'end'")
+            return "end"
+        elif hasattr(tool_call, 'name') and tool_call.name == '__conversational_response':
+            print(f"[DEBUG] should_continue: Found __conversational_response, returning 'end'")
+            return "end"
+    
+    # Check for max iterations to prevent infinite loops
+    # Count how many times we've been through the agent node
+    agent_call_count = sum(1 for msg in messages if isinstance(msg, AIMessage) and getattr(msg, 'tool_calls', None))
+    if agent_call_count >= 5:  # Max 5 tool call iterations
+        print(f"[DEBUG] should_continue: Max iterations reached ({agent_call_count}), forcing 'end'")
+        return "end"
+    
+    print(f"[DEBUG] should_continue: Found {len(tool_calls)} tool_calls (not __conversational_response), returning 'continue'")
+    return "continue"
     
 
 def try_except_continue(state, func):
-    while True:
+    retry_count = 0
+    max_retries = 3
+    while retry_count < max_retries:
         try:
+            print(f"[DEBUG] try_except_continue: Calling {func.__name__ if hasattr(func, '__name__') else func} (attempt {retry_count + 1}/{max_retries})")
+            import sys
+            sys.stdout.flush()
             ret = func(state)
+            print(f"[DEBUG] try_except_continue: {func.__name__ if hasattr(func, '__name__') else func} completed successfully")
+            sys.stdout.flush()
             return ret
         except Exception as e:
-            print("I crashed trying to run:", func)
+            retry_count += 1
+            print(f"[ERROR] try_except_continue: Crashed trying to run {func.__name__ if hasattr(func, '__name__') else func} (attempt {retry_count}/{max_retries})")
             print("Here is my error")
             print(e)
             traceback.print_exception(*sys.exc_info())
+            if retry_count >= max_retries:
+                print(f"[ERROR] try_except_continue: Max retries ({max_retries}) reached, raising exception")
+                sys.stdout.flush()
+                raise
             continue
 
 class ReMEmbRAgent(Agent):
@@ -133,6 +165,9 @@ class ReMEmbRAgent(Agent):
 
         # Support for Ollama functions
         elif llm_type == 'command-r':
+            llm = ChatOllama(model=llm_type, temperature=temperature, num_ctx=num_ctx)
+        elif llm_type == 'codestral':
+            # Codestral works better without forced JSON for function calling
             llm = ChatOllama(model=llm_type, temperature=temperature, num_ctx=num_ctx)
         else:
             llm = ChatOllama(model=llm_type, format="json", temperature=temperature, num_ctx=num_ctx)
@@ -256,6 +291,16 @@ class ReMEmbRAgent(Agent):
 
         response = model.invoke({"question": question, "chat_history": messages[:]})
 
+        print(f"[DEBUG] agent: Response type: {type(response)}")
+        print(f"[DEBUG] agent: Response has tool_calls attribute: {hasattr(response, 'tool_calls')}")
+        tool_calls = getattr(response, 'tool_calls', None)
+        print(f"[DEBUG] agent: tool_calls value: {tool_calls}")
+        print(f"[DEBUG] agent: tool_calls type: {type(tool_calls)}")
+        if tool_calls:
+            print(f"[DEBUG] agent: tool_calls length: {len(tool_calls)}")
+        import sys
+        sys.stdout.flush()
+
         if response.tool_calls:
             for tool_call in response.tool_calls:
                 if tool_call['name'] != "__conversational_response":
@@ -264,7 +309,8 @@ class ReMEmbRAgent(Agent):
 
         self.agent_call_count += 1
 
-
+        print(f"[DEBUG] agent: Returning state with {len([response])} messages")
+        sys.stdout.flush()
         return {"messages": [response]}
 
 
@@ -278,20 +324,27 @@ class ReMEmbRAgent(Agent):
         Returns:
             dict: The updated state with re-phrased question
         """
+        print(f"[DEBUG] generate: Starting generate function")
+        import sys
+        sys.stdout.flush()
+        
         messages = state["messages"]
         question = messages[0].content \
                 + "\n Please responsed in the desired format."
         last_message = messages[-1]
 
+        print(f"[DEBUG] generate: Got {len(messages)} messages, last message type: {type(last_message)}")
+        sys.stdout.flush()
 
         docs = last_message.content
+        print(f"[DEBUG] generate: Docs length: {len(str(docs))} chars")
+        sys.stdout.flush()
 
         prompt = PromptTemplate(
             template=self.generate_prompt,
             input_variables=["context", "question"],
         )
         filled_prompt = prompt.invoke({'question':question})
-
 
         gen_prompt = ChatPromptTemplate.from_messages(
             [
@@ -306,37 +359,107 @@ class ReMEmbRAgent(Agent):
 
         model = gen_prompt | self.chat
 
-        response = model.invoke({"question": question, "chat_history": messages[1:]})
+        print(f"[DEBUG] generate: About to invoke model with codestral")
+        sys.stdout.flush()
+        
+        try:
+            response = model.invoke({"question": question, "chat_history": messages[1:]})
+            print(f"[DEBUG] generate: Model invoke completed, response type: {type(response)}")
+            sys.stdout.flush()
+        except Exception as e:
+            print(f"[ERROR] generate: Exception during model.invoke: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.stdout.flush()
+            raise
 
         # let us parse and check the output is a dictionary. raise error otherwise
         response = ''.join(response.content.splitlines())
+        print(f"[DEBUG] generate: Response content length: {len(response)} chars")
+        print(f"[DEBUG] generate: Response preview: {response[:200]}")
+        sys.stdout.flush()
 
         try:
-            if '```json' not in response:
-                # try parsing on its own since we cannot always trust llms
-                parsed = eval(response) 
-            else:
+            import json
+            import ast
+            
+            if '```json' in response:
                 parsed = parse_json(response)
+            elif '```' in response:
+                # Try to extract any code block
+                match = re.search(r'```(?:json)?\s*(.*?)```', response, re.DOTALL | re.IGNORECASE)
+                if match:
+                    json_str = match.group(1).strip()
+                    try:
+                        parsed = json.loads(json_str)
+                    except:
+                        parsed = ast.literal_eval(json_str)
+                else:
+                    raise ValueError("Could not extract JSON from code block")
+            else:
+                # Try parsing as direct JSON first
+                try:
+                    parsed = json.loads(response)
+                except json.JSONDecodeError:
+                    # Fallback to ast.literal_eval for Python literals
+                    try:
+                        parsed = ast.literal_eval(response)
+                    except (ValueError, SyntaxError):
+                        # If it's plain text, wrap it in the expected format
+                        parsed = {
+                            "time": None,
+                            "text": response,
+                            "binary": None,
+                            "position": None,
+                            "duration": None
+                        }
+
+            # Unwrap nested structure if present
+            if "tool_input" in parsed and isinstance(parsed.get("tool_input"), dict):
+                if "response" in parsed["tool_input"]:
+                    parsed = parsed["tool_input"]["response"]
+            elif "tool" in parsed and parsed.get("tool") == "__conversational_response":
+                # Handle case where response might be at top level
+                if "response" in parsed:
+                    parsed = parsed["response"]
 
             # then check it has all the required keys
             keys_to_check_for = ["time", "text", "binary", "position", "duration"]
 
             for key in keys_to_check_for:
                 if key not in parsed:
-                    raise ValueError("Missing all the required keys during generate. Retrying...")
-                
+                    # Fill missing keys with None instead of raising error
+                    parsed[key] = None
+                    print(f"Warning: Missing key '{key}' in response, filling with None")
+            
             if type(parsed['position']) == str:
-                parsed['position'] = eval(parsed['position'])
+                try:
+                    parsed['position'] = ast.literal_eval(parsed['position'])
+                except:
+                    parsed['position'] = None
             
             if (parsed['position'] is not None) and len(parsed['position']) != 3:
-                raise ValueError(f"Shape of position was incorrect. {parsed['position']}. Retrying...")
+                print(f"Warning: Position shape incorrect: {parsed['position']}, setting to None")
+                parsed['position'] = None
 
-        except:
-            raise ValueError("Generate call failed. Retrying...")
+        except Exception as e:
+            print(f"Error parsing response: {e}")
+            print(f"Response was: {response[:200]}")
+            # Instead of retrying forever, wrap the response
+            parsed = {
+                "time": None,
+                "text": str(response),
+                "binary": None,
+                "position": None,
+                "duration": None
+            }
 
         self.previous_tool_requests = "These are the tools I have previously used so far: \n"
         self.agent_call_count = 0
-        return {"messages": [str(parsed)]}
+        # Convert dict to JSON string and wrap in AIMessage for LangGraph
+        import json
+        response_str = json.dumps(parsed)
+        return {"messages": [AIMessage(content=response_str)]}
 
 
 
@@ -352,14 +475,32 @@ class ReMEmbRAgent(Agent):
         workflow.add_node("agent", lambda state: try_except_continue(state, self.agent))  # agent
         # retrieve = ToolNode([self.retriever_tool])
         tool_node = ToolNode(self.tool_list)
-        workflow.add_node("action", tool_node)
+        
+        def action_wrapper(state):
+            print("[DEBUG] ========== ACTION NODE (ToolNode) CALLED ==========")
+            import sys
+            sys.stdout.flush()
+            print(f"[DEBUG] action: State has {len(state.get('messages', []))} messages")
+            sys.stdout.flush()
+            result = tool_node.invoke(state)
+            print(f"[DEBUG] action: ToolNode completed, returning {len(result.get('messages', []))} messages")
+            sys.stdout.flush()
+            return result
+        
+        workflow.add_node("action", action_wrapper)
         # workflow.add_node("action", lambda state: try_except_continue(state, tool_node))
 
 
         # workflow.add_node("action", self.call_tool)
 
+        def generate_wrapper(state):
+            print("[DEBUG] ========== GENERATE NODE WRAPPER CALLED ==========")
+            import sys
+            sys.stdout.flush()
+            return try_except_continue(state, self.generate)
+        
         workflow.add_node(
-            "generate", lambda state: try_except_continue(state, self.generate)
+            "generate", generate_wrapper
         )  # Generating a response after we know the documents are relevant
         # Call agent node to decide to retrieve or not
 

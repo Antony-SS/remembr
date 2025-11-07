@@ -104,7 +104,14 @@ class VILACaptioner(Captioner):
             
             
         images_tensor = process_images(images, self.image_processor, self.model.config).to(self.model.device, dtype=torch.float16)
-        input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).cuda()
+        # Convert single tensor back to list if needed
+        if isinstance(images_tensor, torch.Tensor) and len(images_tensor.shape) == 4:
+            images_tensor = [images_tensor[i] for i in range(images_tensor.shape[0])]
+        elif isinstance(images_tensor, torch.Tensor) and len(images_tensor.shape) == 3:
+            images_tensor = [images_tensor]
+        # input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).cuda()
+        # In vila_captioner.py line 107, change to:
+        input_ids = tokenizer_image_token(prompt, self.tokenizer, return_tensors="pt").unsqueeze(0).cuda()
 
         stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
         keywords = [stop_str]
@@ -113,9 +120,10 @@ class VILACaptioner(Captioner):
         with torch.inference_mode():
             output_ids = self.model.generate(
                 input_ids,
-                images=[
-                    images_tensor,
-                ],
+                media={'image': images_tensor},
+                media_config={
+                    'image': {'do_sample': True, 'temperature': args.temperature}
+                },
                 do_sample=True if args.temperature > 0 else False,
                 temperature=args.temperature,
                 top_p=args.top_p,
@@ -126,12 +134,17 @@ class VILACaptioner(Captioner):
                 pad_token_id=self.tokenizer.eos_token_id
             )
 
-        outputs = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
+        # Convert output to text and return only the string
+        input_token_len = input_ids.shape[1]
+
+        # Extract only the generated tokens (skip input tokens)
+        if output_ids.shape[1] > input_token_len:
+            new_tokens = output_ids[:, input_token_len:]
+        else:
+            new_tokens = output_ids
+
+        outputs = self.tokenizer.batch_decode(new_tokens, skip_special_tokens=True)[0]
         outputs = outputs.strip()
-        if outputs.endswith(stop_str):
-            outputs = outputs[: -len(stop_str)]
-        outputs = outputs.strip()
-        # print(outputs)
 
         return outputs
 

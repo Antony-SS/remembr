@@ -153,7 +153,9 @@ class ROSMemoryBuilder(Node):
         else:
             cv_img = bridge.imgmsg_to_cv2(img_msg)
 
-        PIL_img = im.fromarray(cv_img)
+        # Convert BGR to RGB (OpenCV uses BGR, PIL uses RGB)
+        cv_img_rgb = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+        PIL_img = im.fromarray(cv_img_rgb)
         stamp = img_msg.header.stamp
         converted_time = float(str(stamp.sec) + '.' + str(stamp.nanosec))
         data_dict = {

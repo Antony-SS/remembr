@@ -259,7 +259,7 @@ class ReMEmbRAgent(Agent):
 
 
         # limit to 5 tool calls.
-        if self.agent_call_count < 3:
+        if self.agent_call_count < 5:
             model = model.bind_tools(tools=self.tool_definitions)
             prompt = self.agent_prompt
         else:

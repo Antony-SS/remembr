@@ -24,20 +24,76 @@ questions like "How long were you in the building for?"
     ./vila_setup.sh remembr
     ```
 
-2. Install OLLama
+2. Install ROS2 (if not already installed)
+
+   The `perception-stack` dependency requires ROS2 (Humble, Iron, or compatible distribution). 
+
+   ```bash
+   # For Ubuntu 22.04 (ROS2 Humble)
+   sudo apt update
+   sudo apt install software-properties-common
+   sudo add-apt-repository universe
+   sudo apt update && sudo apt install curl -y
+   sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
+   sudo apt update
+   sudo apt install ros-humble-desktop -y
+   
+   # Source ROS2
+   source /opt/ros/humble/setup.bash
+   ```
+   
+   > Adjust `humble` for your ROS2 distribution. For other distributions, see [ROS2 Installation Guide](https://docs.ros.org/en/humble/Installation.html)
+
+3. Install ROS2 Python packages
+
+   ```bash
+   sudo apt-get install -y \
+       python3-rosidl-runtime-py \
+       ros-humble-cv-bridge \
+       ros-humble-sensor-msgs \
+       ros-humble-builtin-interfaces
+   ```
+   
+   > Adjust `humble` for your ROS2 distribution
+
+4. Install OLLama
 
     ```
     curl -fsSL https://ollama.com/install.sh | sh
     ```
 
-3. Install other Python dependencies
+5. Install perception-stack
 
+    The `perception-stack` dependency requires manual installation to run its setup script.
+
+    ```bash
+    # Make sure ROS2 is sourced first
+    source /opt/ros/humble/setup.bash  # Adjust for your ROS2 distribution
+    
+    # Clone perception-stack
+    cd deps  # or create deps directory if it doesn't exist
+    git clone https://github.com/Antony-SS/perception-stack.git
+    cd perception-stack
+    
+    # Make setup script executable and run it
+    chmod +x setup.sh
+    ./setup.sh
+    
+    cd ../..
     ```
+
+6. Install other Python dependencies
+
+    ```bash
+    # Make sure ROS2 is sourced first
+    source /opt/ros/humble/setup.bash  # Adjust for your ROS2 distribution
     conda activate remembr
     python -m pip install -r requirements.txt
     ```
+    
+    > Note: `perception-stack` is installed manually in step 5, so it is not included in `requirements.txt`.
 
-4. Install MilvusDB
+7. Install MilvusDB
 
 ```
  curl -sfL https://raw.githubusercontent.com/milvus-io/milvus/master/scripts/standalone_embed.sh -o launch_milvus_container.sh
@@ -123,13 +179,15 @@ print(response.position)
 ### Example 1 - ROS Bag Gradio Demo (offline)
 
 1. Follow the setup above
-1. Run the demo
+2. Run the demo
 
     ```bash
+    # Make sure ROS2 is sourced (if using scripts that require perception-stack)
+    source /opt/ros/humble/setup.bash  # Adjust for your ROS2 distribution
     cd examples/chat_demo
     python demo.py
     ```
-2. Open your web browser to load your ROSBag and query the agent
+3. Open your web browser to load your ROSBag and query the agent
 
 
 > Note RCL import error
@@ -161,6 +219,7 @@ These projects are
 4. ROS2 rclpy:  https://github.com/ros2/rclpy
 5. Gradio:  https://github.com/gradio-app/gradio
 6. LangGraph:  https://langchain-ai.github.io/langgraph/
+7. perception-stack:  https://github.com/Antony-SS/perception-stack
 
 Please refer to the ``LICENSE.md`` file for details regarding the usage of the code directly authored / contained in this repository.
 

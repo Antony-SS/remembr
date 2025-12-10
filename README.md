@@ -15,6 +15,8 @@ questions like "How long were you in the building for?"
 <a id="setup"></a>
 ## Setup
 
+HIGHLY RECCOMENDED USING A CONDA ENV FOR ALL OF THIS.
+
 1. Download VILA
 
     ```
@@ -87,7 +89,6 @@ questions like "How long were you in the building for?"
     ```bash
     # Make sure ROS2 is sourced first
     source /opt/ros/humble/setup.bash  # Adjust for your ROS2 distribution
-    conda activate remembr
     python -m pip install -r requirements.txt
     ```
     
